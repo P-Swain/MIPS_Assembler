@@ -145,45 +145,140 @@ public:
     ~Assembler()
     {
         // destructor: work not started yet on this
-        cout << "Desctructor not Created yet" << endl;
+        cout << "Destructor not Created yet" << endl;
     }
 
-    
-    // method to temporarily ignore everything until the .text segment is found
-    bool foundMainSegment()
+    // Main method to drive the assembly process
+    void assemble()
     {
-        string line;
-        while (getline(this->inputfile, line))
+        firstPass();
+        // secondPass(); // This would be called next
+    }
+
+    // First Pass: State Memory Allocation & Instruction Label Address Mapping
+    void firstPass()
+    {
+        // Defining Variable for Current Segment Type Storage
+        enum Segment
         {
-            if (line == "main:")
-            {
-                return true;
-            }
-        }
-        return false;
-    }
+            UNKNOWN,
+            TEXT,
+            DATA
+        };
+        Segment currentSegment = UNKNOWN;
 
-    // to test if file is being read correctly
-    void testRead()
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            readLine(this->inputfile);
-        }
-    }
-
-private:
-
-    ifstream inputfile;
-
-    void readLine(ifstream &inputfile)
-    {
         string line;
+
+        // Going to beginning of file for first pass
+        inputfile.clear();
+        inputfile.seekg(0, ios::beg);
+
+        cout << "\nStarting First Pass..." << endl;
+
         while (getline(inputfile, line))
         {
-            cout << line << endl;
+            // Removing trailing and leading whitespaces
+            line.erase(0, line.find_first_not_of(" \t\n\r"));
+            line.erase(line.find_last_not_of(" \t\n\r") + 1);
+
+            // Skipping empty lines and comments
+            if (line.empty() || line[0] == '#' || line.find(".globl") != string::npos)
+                continue; 
+
+            // Checking for Segment Type
+            if (line.find(".data") != string::npos)
+            {
+                currentSegment = DATA;
+                continue;
+            }
+            if (line.find(".text") != string::npos)
+            {
+                currentSegment = TEXT;
+                continue;
+            }
+            if (currentSegment == UNKNOWN)
+                continue;
+
+            // Checking for an Instruction Label
+            size_t colonPos = line.find(":");
+            if (colonPos != string::npos)
+            {
+                string label = line.substr(0, colonPos);
+                // Assigning Label the Address from Current Segment
+                symbolTable[label] = (currentSegment == TEXT) ? textAddress : dataAddress;
+
+                // Removing label to check for any instruction on the same line:
+
+                line = line.substr(colonPos + 1);
+                line.erase(0, line.find_first_not_of(" \t"));
+                
+                if (line.empty())
+                    continue; // If line now empty, it was only a label
+            }
+
+            if (currentSegment == TEXT)
+            {
+                textAddress += 4; // All MIPS instructions are 4 bytes
+            }
+
+            else if (currentSegment == DATA)
+            {
+                stringstream ss(line);
+                string firstToken;
+                ss >> firstToken;
+
+                // Handling .data directives for static memory allocation planning
+                if (firstToken == ".word")
+                {
+                    // Planning for a 4-byte word
+                    dataAddress += 4;
+                }
+                else if (firstToken == ".asciiz")
+                {
+                    // Planning space for a string
+                    size_t start = line.find("\"") + 1;
+                    size_t end = line.rfind("\"");
+                    if (start != string::npos && end != string::npos)
+                    {
+                        // Allocating space for each character plus the null terminator
+                        dataAddress += (end - start + 1);
+                    }
+                }
+                else if (firstToken == ".space")
+                {
+                    // Planning for a block of empty space
+                    string spaceVal;
+                    ss >> spaceVal;
+                    dataAddress += stoi(spaceVal);
+                }
+            }
         }
+        cout << "First Pass Complete." << endl;
     }
+
+    // Utility to print the generated symbol table for verification
+    void printSymbolTable()
+    {
+        cout << "\n--- Symbol Table ---" << endl;
+        cout << "Label -> Address" << endl;
+        cout << "--------------------" << endl;
+        for (const auto& pair : symbolTable)
+        {
+            cout << pair.first << " -> 0x" << hex << pair.second << endl;
+        }
+        cout << "--------------------" << endl;
+    }
+
+
+private:
+    ifstream inputfile;
+
+    // Symbol Table: maps a label string to a memory address
+    unordered_map<string, unsigned int> symbolTable;
+
+    // Address counters for the text and data segments
+    unsigned int textAddress = 0x00400000; // MIPS text segment starts here
+    unsigned int dataAddress = 0x10010000; // MIPS data segment starts here
 };
 
 int main(int argc, char *argv[])
